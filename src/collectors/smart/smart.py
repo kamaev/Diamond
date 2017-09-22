@@ -9,8 +9,9 @@ Collect data from S.M.A.R.T.'s attribute reporting.
 
 """
 
-import subprocess
 import os
+import re
+import subprocess
 import diamond.collector
 
 
@@ -18,38 +19,57 @@ class SMARTAttribute(object):
     """
     S.M.A.R.T. attribute object.
     """
-    def __init__(self,
-                 instance):
+    def __new__(cls,
+                attribute_data,
+                conditions,
+                device):
 
-        self.instance = instance
-        self.name = self.instance[1].lower()
-        self.value = int(self.instance[3])
-        self.worst = int(self.instance[4])
-        self.thresh = int(self.instance[5])
-        self.priority = self.instance[6].lower()
+        obj = super(SMARTAttribute, cls).__new__(cls)
 
-        if self.name == 'unknown_attribute':
-            self.attribute = self.instance[0]
+        obj.attribute_data = attribute_data
+        obj.device = device
+        obj.name = obj.attribute_data[1].lower()
+        obj.priority = obj.attribute_data[6].lower()
+
+        if obj.name == 'unknown_attribute':
+            obj.attribute = obj.attribute_data[0]
         else:
-            self.attribute = self.name
+            obj.attribute = obj.name
 
-        if '/' not in self.instance[9]:
-            self.raw_val = int(self.instance[9])
+        if conditions['force_prefails']:
+            force_fetch_priority = 'pre-fail'
+        else:
+            force_fetch_priority = None
+
+        if obj.priority == force_fetch_priority or \
+           obj.attribute in conditions['attributes'] and \
+           conditions['attributes'][obj.attribute]:
+            return obj
+
+    def __init__(self,
+                 attribute_data,
+                 conditions,
+                 device):
+
+        if self.device in conditions['aliases'] and \
+           self.attribute in conditions['aliases'][self.device]:
+            self.attribute = conditions['aliases'][self.device][self.attribute]
+
+        self.value = int(self.attribute_data[3])
+        self.worst = int(self.attribute_data[4])
+        self.thresh = int(self.attribute_data[5])
+
+        if '/' not in self.attribute_data[9]:
+            self.raw_val = int(self.attribute_data[9])
         else:
             try:
-                num, denom = self.instance[9].split('/')
+                num, denom = self.attribute_data[9].split('/')
                 self.raw_val = 100*(int(num)/int(denom))
             except ZeroDivisionError:
                 self.raw_val = 0
 
 
 class SmartCollector(diamond.collector.Collector):
-    """
-    Collector subclass of diamond.collector.Collector.
-    """
-    def __init__(self, *args, **kwargs):
-        super(SmartCollector, self).__init__(*args, **kwargs)
-        self.metrics = {}
 
     def get_default_config_help(self):
         """
@@ -57,14 +77,16 @@ class SmartCollector(diamond.collector.Collector):
         """
         config_help = super(SmartCollector, self).get_default_config_help()
         config_help.update({
-            'devices': "Devices to collect stats on",
+            'devices': 'Devices to collect stats on (regexp)',
             'bin': 'The path to the smartctl binary',
             'use_sudo': 'Use sudo?',
             'sudo_cmd': 'Path to sudo',
             'attributes': 'Attributes to publish',
             'aliases': 'Aliases to assign',
             'valtypes': 'Values to publish',
-            'force_prefails': 'Fetch prefails anyway'})
+            'force_prefails': 'If True, fetches all attributes ' \
+            'with pre-fail priority and "attributes" specified ' \
+            'in config. Otherwise, only "attributes" will be fetched.'})
 
         return config_help
 
@@ -74,7 +96,8 @@ class SmartCollector(diamond.collector.Collector):
         """
         config = super(SmartCollector, self).get_default_config()
         config.update({
-            'devices': ['sda'],
+            'path': 'smart',
+            'devices': '^disk[0-9]$|^sd[a-z]$|^hd[a-z]$',
             'bin': 'smartctl',
             'use_sudo': False,
             'sudo_cmd': '/usr/bin/sudo',
@@ -102,54 +125,43 @@ class SmartCollector(diamond.collector.Collector):
 
         return max_line + 1
 
-    def convert_to_metric(self, device, smart):
+    def publish_metrics(self, smart):
         """
-        Converts fetched data into graphite metric format.
+        Publish S.M.A.R.T. attributes.
         """
-        if device in self.config['aliases'] and \
-           smart.attribute in self.config['aliases'][device]:
-            smart.attribute = self.config['aliases'][device][smart.attribute]
+        if smart is not None:
 
-        for valtype in self.config['valtypes']:
-            metric = "%s.%s.%s.%s" % (device, smart.priority, valtype,
-                                      smart.attribute)
+            for valtype in self.config['valtypes']:
+                metric = "%s.%s.%s.%s" % (smart.device, smart.priority,
+                                          smart.attribute, valtype)
 
-            self.metrics[metric] = getattr(smart, valtype)
+                self.publish(metric, getattr(smart, valtype))
 
-    def fetch_data(self, device):
+    def collect(self):
         """
-        Fetching S.M.A.R.T. data.
+        Collect S.M.A.R.T. attributes.
         """
-        if self.config['force_prefails']:
-            critical = 'pre-fail'
-        else:
-            critical = None
-
-        command = [self.config['bin'], "-A", os.path.join('/dev', device)]
+        devices = re.compile(self.config['devices'])
+        command = [self.config['bin'], "-A", None]
 
         if diamond.collector.str_to_bool(self.config['use_sudo']):
             command.insert(0, self.config['sudo_cmd'])
 
-        attributes = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE
-            ).communicate()[0].strip().splitlines()
+        for device in os.listdir('/dev'):
+            if devices.match(device):
 
-        start_line = self.find_attr_start_line(attributes)
+                command[-1] = os.path.join('/dev', device)
 
-        for attr in attributes[start_line:]:
-            smart = SMARTAttribute(instance=attr.split())
-            if smart.priority == critical or \
-               smart.attribute in self.config['attributes'] and \
-               self.config['attributes'][smart.attribute]:
-                self.convert_to_metric(device, smart)
+                attributes = subprocess.Popen(
+                    command,
+                    stdout=subprocess.PIPE
+                    ).communicate()[0].strip().splitlines()
 
-    def collect(self):
-        """
-        Collect and publish S.M.A.R.T. attributes.
-        """
-        for device in self.config['devices']:
-            self.fetch_data(device)
+                start_line = self.find_attr_start_line(attributes)
 
-        for metric in self.metrics:
-            self.publish(metric, self.metrics[metric])
+                for attr in attributes[start_line:]:
+                    smart = SMARTAttribute(attribute_data=attr.split(),
+                                           conditions=self.config,
+                                           device=device)
+
+                    self.publish_metrics(smart)

@@ -8,7 +8,7 @@ Collect data from S.M.A.R.T.'s attribute reporting.
 
 #### Dependencies
 
- * [smartmontools](http://sourceforge.net/apps/trac/smartmontools/wiki)
+ * [smartmontools](https://www.smartmontools.org)
 
 
 #### Options

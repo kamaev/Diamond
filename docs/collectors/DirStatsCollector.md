@@ -23,4 +23,6 @@ metrics_whitelist | None | Regex to match metrics to transmit. Mutually exclusiv
 ```
 servers.hostname.logs.current_size 18
 servers.hostname.logs.days_unmodified 1
+servers.hostname.subdirs 5
+servers.hostname.files 18
 ```

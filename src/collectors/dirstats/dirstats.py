@@ -32,6 +32,7 @@ class Directory(object):
         self.path = path
         self.size = 0
         self.m_date = 0
+        self.subdirs = 0
         self.files = 0
         self.skipped = set()
 
@@ -70,6 +71,7 @@ class Directory(object):
 
                     if S_ISDIR(mode):
 
+                        self.subdirs += 1
                         dirs_queue.put(fullpath)
 
                     elif S_ISREG(mode):
@@ -122,9 +124,13 @@ class DirStatsCollector(diamond.collector.Collector):
                     self.log.error(message)
 
             metrics.update({
+
                 dir_name + '.current_size': int(directory.size/MB),
-                dir_name + '.days_unmodified': int((time()-directory.m_date)/DAY),
-                dir_name + '.files_total': directory.files})
+                dir_name + '.days_unmodified': int(
+                    (time()-directory.m_date)/DAY),
+
+                dir_name + '.subdirs': directory.subdirs,
+                dir_name + '.files': directory.files})
 
         for metric in metrics:
             self.publish(metric, metrics[metric])

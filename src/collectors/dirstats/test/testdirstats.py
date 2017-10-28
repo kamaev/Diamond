@@ -125,7 +125,8 @@ class TestDirStatsCollector(CollectorTestCase):
 
         self.assertPublishedMany(publish_mock, {
             'logs.current_size': 18,
-            'logs.days_unmodified': 1
+            'logs.days_unmodified': 1,
+            'logs.files_total': 18
         })
 
 

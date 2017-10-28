@@ -7,6 +7,7 @@ Collect given directories stats.
 
 import os
 
+from getpass import getuser
 from stat import S_ISDIR, S_ISREG
 from time import time
 
@@ -19,7 +20,7 @@ import diamond.collector
 
 DAY = 86400
 MB = 1048576
-USER = os.getlogin()
+USER = getuser()
 
 
 class Directory(object):
@@ -31,6 +32,7 @@ class Directory(object):
         self.path = path
         self.size = 0
         self.m_date = 0
+        self.files = 0
         self.skipped = set()
 
     def log_skipped(self, os_error):
@@ -65,9 +67,14 @@ class Directory(object):
                 try:
 
                     mode = os.stat(fullpath).st_mode
+
                     if S_ISDIR(mode):
+
                         dirs_queue.put(fullpath)
+
                     elif S_ISREG(mode):
+
+                        self.files += 1
                         self.size += os.stat(fullpath).st_size
                         last_modified = os.stat(fullpath).st_mtime
                         if last_modified > self.m_date:
@@ -95,7 +102,7 @@ class DirStatsCollector(diamond.collector.Collector):
         Returns default configuration options.
         """
         config = super(DirStatsCollector, self).get_default_config()
-        config['dirs'] = dict()
+        config['dirs'] = {}
 
         return config
 
@@ -103,6 +110,8 @@ class DirStatsCollector(diamond.collector.Collector):
         """
         Collect and publish directories stats.
         """
+        metrics = {}
+
         for dir_name in self.config['dirs']:
 
             directory = Directory(self.config['dirs'][dir_name])
@@ -112,10 +121,10 @@ class DirStatsCollector(diamond.collector.Collector):
                 for message in directory.skipped:
                     self.log.error(message)
 
-            params = {
-                'current_size': int(directory.size/MB),
-                'days_unmodified': int((time()-directory.m_date)/DAY)}
+            metrics.update({
+                dir_name + '.current_size': int(directory.size/MB),
+                dir_name + '.days_unmodified': int((time()-directory.m_date)/DAY),
+                dir_name + '.files_total': directory.files})
 
-            for param in params:
-                metric = dir_name + '.' + param
-                self.publish(metric, params[param])
+        for metric in metrics:
+            self.publish(metric, metrics[metric])

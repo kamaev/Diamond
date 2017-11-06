@@ -27,13 +27,13 @@ class EntityMock(object):
 
             self.st_mode = S_IFREG
             self.st_size = MB
-            self.st_mtime = time()-DAY
+            self.st_mtime = time()-(DAY*7)
+            self.st_blocks = 1024
 
         else:
 
             self.st_mode = S_IFDIR
-            self.st_size = 0
-            self.st_mtime = 0
+            self.st_mtime = time()-(DAY*5)
 
 
 class TestDirStatsCollector(CollectorTestCase):
@@ -57,9 +57,8 @@ class TestDirStatsCollector(CollectorTestCase):
     def test_import(self):
         self.assertTrue(DirStatsCollector)
 
-    @patch('os.access', Mock(return_value=True))
     @patch.object(Collector, 'publish')
-    def test_dirqueue(self, publish_mock):
+    def test_non_empty_directory(self, publish_mock):
         patch_listdir = patch('os.listdir', Mock(
             side_effect=[
 
@@ -124,10 +123,33 @@ class TestDirStatsCollector(CollectorTestCase):
         patch_stat.stop()
 
         self.assertPublishedMany(publish_mock, {
-            'logs.current_size': 18,
-            'logs.days_unmodified': 1,
+            'logs.size.current': 9,
+            'logs.size.allocated': 18,
             'logs.subdirs': 5,
-            'logs.files': 18
+            'logs.files': 18,
+            'logs.days_unmodified': 7
+        })
+
+    @patch.object(Collector, 'publish')
+    def test_empty_directory(self, publish_mock):
+        patch_listdir = patch('os.listdir', Mock(return_value=[]))
+
+        patch_stat = patch('os.stat', Mock(
+            side_effect=self.entity_side_effect
+            ))
+
+        patch_listdir.start()
+        patch_stat.start()
+        self.collector.collect()
+        patch_listdir.stop()
+        patch_stat.stop()
+
+        self.assertPublishedMany(publish_mock, {
+            'logs.size.current': 0,
+            'logs.size.allocated': 0,
+            'logs.subdirs': 0,
+            'logs.files': 0,
+            'logs.days_unmodified': 5
         })
 
 

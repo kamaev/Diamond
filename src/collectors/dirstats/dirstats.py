@@ -7,7 +7,6 @@ Collect given directories stats.
 
 import os
 
-from getpass import getuser
 from stat import S_ISDIR, S_ISREG
 from time import time
 
@@ -18,9 +17,9 @@ except ImportError:
 
 import diamond.collector
 
+BLOCK = 512
 DAY = 86400
 MB = 1048576
-USER = getuser()
 
 
 class Directory(object):
@@ -30,19 +29,20 @@ class Directory(object):
     def __init__(self, path):
 
         self.path = path
+        self.allocated = 0
         self.size = 0
-        self.m_date = 0
         self.subdirs = 0
         self.files = 0
+        self.modified = 0
         self.skipped = set()
 
-    def log_skipped(self, os_error):
+    def _log_skipped(self, os_error):
         """
         Log skipped path.
         """
         self.skipped.add(
-            os_error.strerror + ': ' + \
-            os_error.filename + ' User: ' + USER)
+            'Dirstats: skipping ' + os_error.filename + \
+            'Reason: ' + os_error.strerror)
 
     def get_stats(self):
         """
@@ -59,7 +59,7 @@ class Directory(object):
                 entities = os.listdir(path)
 
             except OSError as os_error:
-                self.log_skipped(os_error)
+                self._log_skipped(os_error)
                 continue
 
             for entity in entities:
@@ -77,14 +77,18 @@ class Directory(object):
                     elif S_ISREG(mode):
 
                         self.files += 1
-                        self.size += os.stat(fullpath).st_size
+                        self.size += os.stat(fullpath).st_blocks * BLOCK
+                        self.allocated += os.stat(fullpath).st_size
                         last_modified = os.stat(fullpath).st_mtime
-                        if last_modified > self.m_date:
-                            self.m_date = last_modified
+                        if last_modified > self.modified:
+                            self.modified = last_modified
 
                 except OSError as os_error:
-                    self.log_skipped(os_error)
+                    self._log_skipped(os_error)
                     continue
+
+        if not self.skipped and not self.modified:
+            self.modified = os.stat(self.path).st_mtime
 
 
 class DirStatsCollector(diamond.collector.Collector):
@@ -124,13 +128,12 @@ class DirStatsCollector(diamond.collector.Collector):
                     self.log.error(message)
 
             metrics.update({
-
-                dir_name + '.current_size': int(directory.size/MB),
-                dir_name + '.days_unmodified': int(
-                    (time()-directory.m_date)/DAY),
-
+                dir_name + '.size.allocated': int(directory.allocated/MB),
+                dir_name + '.size.current': int(directory.size/MB),
                 dir_name + '.subdirs': directory.subdirs,
-                dir_name + '.files': directory.files})
+                dir_name + '.files': directory.files,
+                dir_name + '.days_unmodified': int(
+                    (time()-directory.modified)/DAY)})
 
         for metric in metrics:
             self.publish(metric, metrics[metric])

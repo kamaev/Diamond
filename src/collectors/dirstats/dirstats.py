@@ -42,7 +42,7 @@ class Directory(object):
         """
         self.skipped.add(
             'Dirstats: skipping ' + os_error.filename + \
-            'Reason: ' + os_error.strerror)
+            ' Reason: ' + os_error.strerror)
 
     def get_stats(self):
         """

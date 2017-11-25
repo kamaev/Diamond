@@ -108,7 +108,9 @@ class DirStatsCollector(diamond.collector.Collector):
         Returns default configuration options.
         """
         config = super(DirStatsCollector, self).get_default_config()
-        config['dirs'] = {}
+        config.update({
+            'path': 'dirstats',
+            'dirs': {}})
 
         return config
 
